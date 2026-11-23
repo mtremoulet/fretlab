@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FRET//LAB — Adaptive Fretboard Trainer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            studio: {
+              bg: '#111113',
+              surface: '#18181B',
+              elevated: '#222226',
+              border: '#2E2E34',
+              accent: '#FF5500', // Braun / Teenage Engineering signal orange
+              accentHover: '#FF6A1F',
+              wood: '#1C1917',
+              fret: '#52525B',
+              string: '#A1A1AA',
+            },
+            paper: {
+              bg: '#F4F3EF',
+              surface: '#FFFFFF',
+              elevated: '#EAE8E1',
+              border: '#D6D3C9',
+              wood: '#272421',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    textarea, input {
+      user-select: text;
+    }
+    @keyframes targetPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 85, 0, 0.65); }
+      50% { transform: scale(1.08); box-shadow: 0 0 0 10px rgba(255, 85, 0, 0); }
+    }
+    .target-dot-pulse {
+      animation: targetPulse 1.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+    }
+    @keyframes shakeError {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+    .shake-error {
+      animation: shakeError 0.25s ease-in-out;
+    }
+    /* Custom scrollbar for full-neck horizontal view on narrow mobile screens */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-paper-bg text-zinc-900 dark:bg-studio-bg dark:text-zinc-100 font-sans min-h-screen flex flex-col justify-between transition-colors duration-200">
+
+  <!-- TOP HEADER BAR -->
+  <header class="w-full border-b border-paper-border dark:border-studio-border bg-paper-surface/80 dark:bg-studio-surface/80 backdrop-blur-md sticky top-0 z-30">
+    <div class="max-w-5xl mx-auto px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2">
+      <!-- Brand / Title -->
+      <div class="flex items-center gap-2.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-studio-accent"></div>
+        <span class="font-mono font-bold tracking-tight text-sm sm:text-base">FRET<span class="text-studio-accent">//</span>LAB</span>
+        <span class="hidden md:inline-block text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-paper-elevated dark:bg-studio-elevated text-zinc-500 dark:text-zinc-400">
+          Simon + FSRS Engine
+        </span>
+      </div>
+
+      <!-- Zone Selector Pills -->
+      <nav aria-label="Fretboard Zones" class="flex items-center bg-paper-elevated dark:bg-studio-bg p-1 rounded-lg border border-paper-border dark:border-studio-border overflow-x-auto max-w-full no-scrollbar">
+        <button data-zone="0-4" class="zone-btn px-2.5 sm:px-3 py-1 rounded-md font-mono text-xs font-semibold transition-all whitespace-nowrap">0–4</button>
+        <button data-zone="5-8" class="zone-btn px-2.5 sm:px-3 py-1 rounded-md font-mono text-xs font-semibold transition-all whitespace-nowrap">5–8</button>
+        <button data-zone="9-12" class="zone-btn px-2.5 sm:px-3 py-1 rounded-md font-mono text-xs font-semibold transition-all whitespace-nowrap">9–12</button>
+        <button data-zone="sliding" class="zone-btn px-2.5 sm:px-3 py-1 rounded-md font-mono text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1">
+          <span>Sliding</span>
+          <span id="sliding-badge" class="text-[10px] opacity-80"></span>
+        </button>
+        <button data-zone="full" class="zone-btn px-2.5 sm:px-3 py-1 rounded-md font-mono text-xs font-semibold transition-all whitespace-nowrap">Full Neck</button>
+      </nav>
+
+      <!-- Utility Controls -->
+      <div class="flex items-center gap-1.5">
+        <!-- Target Speed Selector -->
+        <select id="speed-select" title="Mastery Reaction Target Time" class="px-2 py-1.5 rounded-lg border border-paper-border dark:border-studio-border bg-paper-surface dark:bg-studio-elevated hover:border-studio-accent text-xs font-mono font-medium transition-colors focus:outline-none">
+          <option value="3500">Relaxed 3.5s</option>
+          <option value="2200">Standard 2.2s</option>
+          <option value="1400">Reflex 1.4s</option>
+        </select>
+
+        <!-- 2-Min Sprint Timer Toggle -->
+        <button id="sprint-btn" title="Toggle 2-Minute Daily Sprint Timer" class="px-2.5 py-1.5 rounded-lg border border-paper-border dark:border-studio-border bg-paper-surface dark:bg-studio-elevated hover:border-studio-accent text-xs font-mono font-medium flex items-center gap-1.5 transition-colors">
+          <span class="w-1.5 h-1.5 rounded-full bg-zinc-400" id="sprint-dot"></span>
+          <span id="sprint-label">2:00</span>
+        </button>
+
+        <!-- Sync / Export Modal Trigger -->
+        <button id="sync-btn" title="Sync, Export, or Import Progress" class="px-2.5 py-1.5 rounded-lg border border-paper-border dark:border-studio-border bg-paper-surface dark:bg-studio-elevated hover:border-studio-accent text-xs font-mono font-medium transition-colors">
+          Sync
+        </button>
+
+        <!-- Theme Toggle -->
+        <button id="theme-btn" title="Toggle Light / Dark Theme" class="p-1.5 rounded-lg border border-paper-border dark:border-studio-border bg-paper-surface dark:bg-studio-elevated hover:border-studio-accent text-zinc-600 dark:text-zinc-300 transition-colors" aria-label="Toggle theme">
+          <svg id="icon-sun" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <svg id="icon-moon" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN WORKSPACE -->
+  <main class="flex-1 w-full max-w-5xl mx-auto px-3 sm:px-6 py-4 sm:py-6 flex flex-col justify-between gap-4 sm:gap-6">
+
+    <!-- TELEMETRY & POOL STATUS STRIP -->
+    <section class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+      <!-- Active Anchor Fret Indicator -->
+      <div class="bg-paper-surface dark:bg-studio-surface border border-paper-border dark:border-studio-border rounded-xl p-2.5 sm:p-3 flex flex-col justify-between">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Active Window</span>
+        <div class="flex items-baseline justify-between mt-1">
+          <span id="stat-window" class="font-mono font-bold text-base sm:text-lg text-studio-accent">FRETS 0–4</span>
+          <span id="stat-anchor" class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-studio-accent/15 text-studio-accent font-semibold">ANCHOR 0</span>
+        </div>
+      </div>
+
+      <!-- Simon Expanding Pool Counter -->
+      <div class="bg-paper-surface dark:bg-studio-surface border border-paper-border dark:border-studio-border rounded-xl p-2.5 sm:p-3 flex flex-col justify-between">
+        <div class="flex items-center justify-between gap-1">
+          <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Simon Pool</span>
+          <div class="flex items-center gap-1.5">
+            <button id="order-toggle-btn" title="Toggle String-by-String vs Cross-String expansion" class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-paper-elevated dark:bg-studio-elevated text-zinc-500 dark:text-zinc-300 hover:border-studio-accent border border-transparent">By String</button>
+            <button id="force-unlock-btn" title="Manually add +1 note to active pool" class="text-[10px] font-mono text-studio-accent hover:underline font-semibold">+1 Note</button>
+          </div>
+        </div>
+        <div class="flex items-baseline justify-between mt-1">
+          <span id="stat-pool" class="font-mono font-bold text-base sm:text-lg">4 / 30</span>
+          <span id="stat-mastered" class="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">8 reps to +1</span>
+        </div>
+      </div>
+
+      <!-- Reaction Latency -->
+      <div class="bg-paper-surface dark:bg-studio-surface border border-paper-border dark:border-studio-border rounded-xl p-2.5 sm:p-3 flex flex-col justify-between">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Last Reflex</span>
+        <div class="flex items-baseline justify-between mt-1">
+          <span id="stat-latency" class="font-mono font-bold text-base sm:text-lg text-zinc-400">— ms</span>
+          <span id="stat-avg-latency" class="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">avg —</span>
+        </div>
+      </div>
+
+      <!-- Session Streak & Accuracy -->
+      <div class="bg-paper-surface dark:bg-studio-surface border border-paper-border dark:border-studio-border rounded-xl p-2.5 sm:p-3 flex flex-col justify-between">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Fluency Streak</span>
+        <div class="flex items-baseline justify-between mt-1">
+          <span id="stat-streak" class="font-mono font-bold text-base sm:text-lg">0</span>
+          <span id="stat-accuracy" class="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">100% acc</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- TOAST / EVENT BANNER -->
+    <div class="h-7 flex items-center justify-center">
+      <div id="event-banner" class="px-3 py-1 rounded-full font-mono text-xs font-medium bg-paper-elevated dark:bg-studio-elevated border border-paper-border dark:border-studio-border text-zinc-600 dark:text-zinc-300 transition-all duration-200 flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        <span id="event-text">Identify the highlighted note. Answer under 3.5s to expand pool.</span>
+      </div>
+    </div>
+
+    <!-- INTERACTIVE FRETBOARD STAGE -->
+    <section class="w-full bg-paper-surface dark:bg-studio-surface border border-paper-border dark:border-studio-border rounded-2xl p-3 sm:p-5 shadow-sm">
+      <!-- Top Fretboard Context Row -->
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Target Coordinate:</span>
+          <span id="prompt-hint" class="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-paper-elevated dark:bg-studio-elevated">
+            String 6 (Low E) · Fret 0
+          </span>
+        </div>
+
+        <!-- Sliding Window Manual Shift & Heatmap Toggle -->
+        <div class="flex items-center gap-2">
+          <div id="sliding-controls" class="hidden items-center gap-1">
+            <button id="slide-down-btn" title="Slide 4-fret window down 1 fret" class="px-2 py-0.5 rounded bg-paper-elevated dark:bg-studio-elevated hover:border-studio-accent border border-paper-border dark:border-studio-border font-mono text-xs">◀ -1 Fret</button>
+            <button id="slide-up-btn" title="Slide 4-fret window up 1 fret" class="px-2 py-0.5 rounded bg-paper-elevated dark:bg-studio-elevated hover:border-studio-accent border border-paper-border dark:border-studio-border font-mono text-xs">+1 Fret ▶</button>
+          </div>
+          <button id="peek-pool-btn" title="Toggle visibility of unlocked pool dots on neck" class="px-2.5 py-0.5 rounded border border-paper-border dark:border-studio-border bg-paper-elevated dark:bg-studio-elevated hover:border-studio-accent font-mono text-[11px] text-zinc-600 dark:text-zinc-300 transition-colors">
+            Show Pool: OFF
+          </button>
+        </div>
+      </div>
+
+      <!-- Fretboard Neck Container (Horizontal scroll enabled only for Full Neck on small screens) -->
+      <div id="fretboard-scroll" class="w-full overflow-x-auto no-scrollbar pb-1">
+        <div id="fretboard-wrapper" class="min-w-full">
+          <!-- Rendered dynamically by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ANSWER KEYPAD & CONTROLS -->
+    <section class="w-full flex flex-col gap-3">
+      <!-- Keypad Header Controls -->
+      <div class="flex flex-wrap items-center justify-between gap-2 px-1">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Notation:</span>
+          <div class="inline-flex rounded-lg bg-paper-elevated dark:bg-studio-surface p-0.5 border border-paper-border dark:border-studio-border">
+            <button data-acc="both" class="acc-btn px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold">♯ / ♭</button>
+            <button data-acc="sharp" class="acc-btn px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold">♯ Only</button>
+            <button data-acc="flat" class="acc-btn px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold">♭ Only</button>
+          </div>
+        </div>
+
+        <div class="hidden sm:flex items-center gap-3 text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+          <span>Keys: <kbd class="px-1.5 py-0.5 rounded bg-paper-elevated dark:bg-studio-elevated border border-paper-border dark:border-studio-border">A–G</kbd> natural</span>
+          <span><kbd class="px-1.5 py-0.5 rounded bg-paper-elevated dark:bg-studio-elevated border border-paper-border dark:border-studio-border">Shift + Key</kbd> sharp</span>
+        </div>
+      </div>
+
+      <!-- 12-Note Chromatic Pad -->
+      <div id="note-keypad" class="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-12 gap-2">
+        <!-- Buttons injected dynamically -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="w-full border-t border-paper-border dark:border-studio-border py-2.5 px-4 text-center">
+    <p class="font-mono text-[11px] text-zinc-500 dark:text-zinc-500">
+      Zero-Server Local-First Trainer · Progress auto-saved to browser storage · <button id="reset-zone-btn" class="underline hover:text-studio-accent transition-colors">Reset Current Zone</button>
+    </p>
+  </footer>
+
+  <!-- SYNC / EXPORT / IMPORT MODAL -->
+  <div id="sync-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="bg-paper-surface dark:bg-studio-surface border border-paper-border dark:border-studio-border rounded-2xl max-w-lg w-full p-5 shadow-2xl flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-mono font-bold text-base">Sync & Backup Memory State</h2>
+          <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Transfer your FSRS stability & unlocked notes between phone and laptop.</p>
+        </div>
+        <button id="close-sync-btn" class="p-1.5 rounded-lg hover:bg-paper-elevated dark:hover:bg-studio-elevated font-mono text-sm">✕</button>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <label class="text-[11px] font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">State Payload (JSON)</label>
+        <textarea id="sync-textarea" rows="5" class="w-full rounded-xl bg-paper-bg dark:bg-studio-bg border border-paper-border dark:border-studio-border p-3 font-mono text-xs focus:outline-none focus:border-studio-accent" placeholder="Paste exported JSON state here to restore..."></textarea>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <button id="copy-state-btn" class="px-3 py-2 rounded-xl bg-studio-accent hover:bg-studio-accentHover text-white font-mono text-xs font-semibold transition-colors">
+          Copy State
+        </button>
+        <button id="import-state-btn" class="px-3 py-2 rounded-xl bg-paper-elevated dark:bg-studio-elevated hover:border-studio-accent border border-paper-border dark:border-studio-border font-mono text-xs font-semibold transition-colors">
+          Load Pasted JSON
+        </button>
+        <button id="download-json-btn" class="col-span-2 sm:col-span-1 px-3 py-2 rounded-xl bg-paper-elevated dark:bg-studio-elevated hover:border-studio-accent border border-paper-border dark:border-studio-border font-mono text-xs font-semibold transition-colors">
+          Download .json
+        </button>
+      </div>
+
+      <div id="sync-status" class="text-xs font-mono text-emerald-500 hidden"></div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * FRET//LAB — Adaptive Guitar Fretboard Trainer
+     * Combines Simon's Expanding Pool heuristic with FSRS-inspired decay
+     * and intra-session response-latency priority scheduling.
+     */
+    (() => {
+      // =========================================================================
+      // 1. MUSICAL CONSTANTS & FRETBOARD GEOMETRY
+      // =========================================================================
+      const CHROMATIC_NOTES = [
+        { index: 0,  sharp: 'C',  flat: 'C',  both: 'C',     naturalKey: 'c', isAccidental: false },
+        { index: 1,  sharp: 'C♯', flat: 'D♭', both: 'C♯/D♭', naturalKey: 'c', isAccidental: true  },
+        { index: 2,  sharp: 'D',  flat: 'D',  both: 'D',     naturalKey: 'd', isAccidental: false },
+        { index: 3,  sharp: 'D♯', flat: 'E♭', both: 'D♯/E♭', naturalKey: 'd', isAccidental: true  },
+        { index: 4,  sharp: 'E',  flat: 'E',  both: 'E',     naturalKey: 'e', isAccidental: false },
+        { index: 5,  sharp: 'F',  flat: 'F',  both: 'F',     naturalKey: 'f', isAccidental: false },
+        { index: 6,  sharp: 'F♯', flat: 'G♭', both: 'F♯/G♭', naturalKey: 'f', isAccidental: true  },
+        { index: 7,  sharp: 'G',  flat: 'G',  both: 'G',     naturalKey: 'g', isAccidental: false },
+        { index: 8,  sharp: 'G♯', flat: 'A♭', both: 'G♯/A♭', naturalKey: 'g', isAccidental: true  },
+        { index: 9,  sharp: 'A',  flat: 'A',  both: 'A',     naturalKey: 'a', isAccidental: false },
+        { index: 10, sharp: 'A♯', flat: 'B♭', both: 'A♯/B♭', naturalKey: 'a', isAccidental: true  },
+        { index: 11, sharp: 'B',  flat: 'B',  both: 'B',     naturalKey: 'b', isAccidental: false },
+      ];
+
+      // Standard Tuning from top visual string (String 1: High E) to bottom visual string (String 6: Low E)
+      // Visual row 0 = High e (stringNum 1), Visual row 5 = Low E (stringNum 6)
+      const STRINGS = [
+        { stringNum: 1, name: 'e', label: 'String 1 (High e)', openPitch: 4, gauge: 1.2 },
+        { stringNum: 2, name: 'B', label: 'String 2 (B)',      openPitch: 11, gauge: 1.5 },
+        { stringNum: 3, name: 'G', label: 'String 3 (G)',      openPitch: 7, gauge: 1.8 },
+        { stringNum: 4, name: 'D', label: 'String 4 (D)',      openPitch: 2, gauge: 2.2 },
+        { stringNum: 5, name: 'A', label: 'String 5 (A)',      openPitch: 9, gauge: 2.6 },
+        { stringNum: 6, name: 'E', label: 'String 6 (Low E)',  openPitch: 4, gauge: 3.1 },
+      ];
+
+      const INLAY_FRETS = new Set([3, 5, 7, 9, 12, 15]);
+      const DOUBLE_INLAY_FRETS = new Set([12]);
+      const MAX_FRET = 12; // 0 to 12 covers the complete octave map
+
+      // Fluency & Simon Pool Hyperparameters
+      const DEFAULT_TARGET_LATENCY_MS = 3500; // Relaxed default so mouse travel never penalizes recall
+      const MASTERY_STREAK_REQ = 2;           // Consecutive fast, accurate hits required per note before expanding pool
+      const INITIAL_POOL_SIZE = 4;            // Start with 4 notes per zone ("Start small is the rule")
+      const STORAGE_KEY = 'fretlab_memory_v1';
+
+      // =========================================================================
+      // 2. STATE MANAGEMENT & PERSISTENCE
+      // =========================================================================
+      let state = {
+        zone: '0-4',                         // '0-4' | '5-8' | '9-12' | 'sliding' | 'full'
+        slidingStart: 1,                     // Anchor fret for Sliding 4-fret window (e.g., 1 => frets 1-4, 3 => frets 3-6)
+        accidentalMode: 'both',              // 'both' | 'sharp' | 'flat'
+        targetLatencyMs: DEFAULT_TARGET_LATENCY_MS,
+        expansionOrder: 'string',            // 'string' (Low E -> A -> D...) | 'cross' (fret-by-fret across strings)
+        theme: 'dark',
+        showPool: false,
+        cards: {},                           // Key: `${stringNum}:${fret}` -> MemoryCard object
+        zoneUnlocked: {                      // Tracks which card keys are unlocked per zone
+          '0-4': [],
+          '5-8': [],
+          '9-12': [],
+          'sliding': [],
+          'full': []
+        },
+        stats: {
+          totalAttempts: 0,
+          totalCorrect: 0,
+          sessionStreak: 0,
+          recentLatencies: []
+        }
+      };
+
+      // Runtime session state (not persisted)
+      let currentTarget = null;     // { stringNum, fret, key, pitchIndex }
+      let lastTargetKey = null;     // Anti-repeat cooldown
+      let promptStartTime = 0;
+      let awaitingNext = false;
+      let sprintInterval = null;
+      let sprintSecondsLeft = 120;
+      let sprintRunning = false;
+
+      function coordKey(stringNum, fret) {
+        return `${stringNum}:${fret}`;
+      }
+
+      function getPitchIndex(stringNum, fret) {
+        const strObj = STRINGS.find(s => s.stringNum === stringNum);
+        return (strObj.openPitch + fret) % 12;
+      }
+
+      function createDefaultCard(stringNum, fret) {
+        return {
+          stringNum,
+          fret,
+          stability: 0.5,         // FSRS-style stability in hours
+          difficulty: 5.0,        // 1 (easy) to 10 (hard)
+          lastSeen: 0,            // Epoch ms
+          lastLatencyMs: null,    // Last response latency
+          attempts: 0,
+          correct: 0,
+          streak: 0,
+          errorBoost: 0           // Transient intra-session priority boost for weak spots
+        };
+      }
+
+      function ensureAllCardsInitialized() {
+        for (const s of STRINGS) {
+          for (let f = 0; f <= MAX_FRET; f++) {
+            const key = coordKey(s.stringNum, f);
+            if (!state.cards[key]) {
+              state.cards[key] = createDefaultCard(s.stringNum, f);
+            }
+          }
+        }
+      }
+
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            state = {
+              ...state,
+              ...parsed,
+              zoneUnlocked: { ...state.zoneUnlocked, ...(parsed.zoneUnlocked || {}) },
+              stats: { ...state.stats, ...(parsed.stats || {}) }
+            };
+          }
+        } catch (err) {
+          console.warn('Could not load saved state, starting fresh.', err);
+        }
+        ensureAllCardsInitialized();
+        ensureZonePoolInitialized(state.zone);
+      }
+
+      function saveState() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (err) {
+          console.warn('Could not persist state to localStorage.', err);
+        }
+      }
+
+      // =========================================================================
+      // 3. ZONE GEOMETRY & SIMON EXPANDING POOL LOGIC
+      // =========================================================================
+      function getZoneFretRange(zone = state.zone) {
+        switch (zone) {
+          case '0-4':     return { start: 0, end: 4 };
+          case '5-8':     return { start: 5, end: 8 };
+          case '9-12':    return { start: 9, end: 12 };
+          case 'sliding': {
+            const start = Math.max(0, Math.min(MAX_FRET - 3, state.slidingStart));
+            return { start, end: start + 3 }; // 4-fret sliding window (e.g., 3-6, 4-7)
+          }
+          case 'full':
+          default:        return { start: 0, end: MAX_FRET };
+        }
+      }
+
+      /**
+       * Orders coordinates inside a zone either:
+       * - 'string': String-by-String (Low E frets 0..4, then A frets 0..4, D, G, B, High e)
+       * - 'cross': Cross-String (Fret 0 across all strings, then Fret 1 across strings, etc.)
+       */
+      function getOrderedZoneCoordinates(zone = state.zone) {
+        const { start, end } = getZoneFretRange(zone);
+        const coords = [];
+        const stringOrder = [6, 5, 4, 3, 2, 1];
+        if (state.expansionOrder === 'cross') {
+          for (let f = start; f <= end; f++) {
+            for (const sNum of stringOrder) {
+              coords.push(coordKey(sNum, f));
+            }
+          }
+        } else {
+          for (const sNum of stringOrder) {
+            for (let f = start; f <= end; f++) {
+              coords.push(coordKey(sNum, f));
+            }
+          }
+        }
+        return coords;
+      }
+
+      function ensureZonePoolInitialized(zone = state.zone) {
+        const allCoords = getOrderedZoneCoordinates(zone);
+        let unlocked = state.zoneUnlocked[zone] || [];
+
+        // Filter out any coordinates that no longer belong to the window (relevant when Sliding shifts)
+        const validSet = new Set(allCoords);
+        unlocked = unlocked.filter(k => validSet.has(k));
+
+        // Seed up to INITIAL_POOL_SIZE (4 notes) if fewer are unlocked
+        for (const key of allCoords) {
+          if (unlocked.length >= INITIAL_POOL_SIZE) break;
+          if (!unlocked.includes(key)) {
+            unlocked.push(key);
+          }
+        }
+        state.zoneUnlocked[zone] = unlocked;
+      }
+
+      function isCardFluent(card) {
+        return (
+          card.streak >= MASTERY_STREAK_REQ &&
+          card.lastLatencyMs !== null &&
+          card.lastLatencyMs <= state.targetLatencyMs
+        );
+      }
+
+      function getRemainingRepsToExpand(zone = state.zone) {
+        const unlocked = state.zoneUnlocked[zone] || [];
+        let remaining = 0;
+        for (const key of unlocked) {
+          const card = state.cards[key];
+          if (!isCardFluent(card)) {
+            const streakNeeded = Math.max(0, MASTERY_STREAK_REQ - card.streak);
+            remaining += Math.max(1, streakNeeded);
+          }
+        }
+        return remaining;
+      }
+
+      /**
+       * Checks the Simon Expanding Pool Gate:
+       * If every unlocked card in the active zone has reached fluency,
+       * inject +1 new coordinate into the active pool.
+       */
+      function evaluateSimonExpansionGate() {
+        const zone = state.zone;
+        const allCoords = getOrderedZoneCoordinates(zone);
+        const unlocked = state.zoneUnlocked[zone];
+
+        const allFluent = unlocked.every(key => isCardFluent(state.cards[key]));
+        if (!allFluent) return false;
+
+        // Find next locked coordinate in this zone
+        const nextKey = allCoords.find(k => !unlocked.includes(k));
+        if (nextKey) {
+          unlocked.push(nextKey);
+          const [sNum, fret] = nextKey.split(':').map(Number);
+          const strObj = STRINGS.find(s => s.stringNum === sNum);
+          const noteObj = CHROMATIC_NOTES[getPitchIndex(sNum, fret)];
+          showBanner(`+1 Note Unlocked: ${strObj.name} String, Fret ${fret} (${formatNoteName(noteObj)})`, 'unlock');
+          saveState();
+          return true;
+        } else if (zone === 'sliding') {
+          // Entire 4-fret sliding window mastered! Advance the sliding window automatically!
+          const nextStart = state.slidingStart >= MAX_FRET - 3 ? 0 : state.slidingStart + 1;
+          state.slidingStart = nextStart;
+          state.zoneUnlocked['sliding'] = [];
+          ensureZonePoolInitialized('sliding');
+          showBanner(`Window Mastered! Sliding anchor → Fret ${nextStart} (${nextStart}–${nextStart + 3})`, 'unlock');
+          saveState();
+          return true;
+        }
+        return false;
+      }
+
+      function manuallyUnlockNextNote() {
+        const zone = state.zone;
+        const allCoords = getOrderedZoneCoordinates(zone);
+        const unlocked = state.zoneUnlocked[zone];
+        const nextKey = allCoords.find(k => !unlocked.includes(k));
+
+        if (!nextKey) {
+          showBanner('All notes in this window are already unlocked!', 'info');
+          return;
+        }
+        unlocked.push(nextKey);
+        const [sNum, fret] = nextKey.split(':').map(Number);
+        const noteObj = CHROMATIC_NOTES[getPitchIndex(sNum, fret)];
+        showBanner(`Added to Pool: String ${sNum}, Fret ${fret} (${formatNoteName(noteObj)})`, 'unlock');
+        saveState();
+        updateStatsUI();
+        renderFretboard();
+      }
+
+      // =========================================================================
+      // 4. LATENCY-WEIGHTED FSRS PRIORITY SCHEDULER
+      // =========================================================================
+      /**
+       * Computes FSRS-inspired Retrievability R ∈ (0, 1] and combines it with
+       * normalized response latency and error penalties to pick the highest-value
+       * next flashcard while preventing back-to-back repeats.
+       */
+      function selectNextTarget() {
+        const zone = state.zone;
+        ensureZonePoolInitialized(zone);
+        const unlockedKeys = state.zoneUnlocked[zone];
+        const now = Date.now();
+
+        // Filter out immediate repeat if pool has > 1 item
+        let candidates = unlockedKeys.filter(k => unlockedKeys.length === 1 || k !== lastTargetKey);
+        if (candidates.length === 0) candidates = unlockedKeys;
+
+        let bestKey = candidates[0];
+        let highestScore = -Infinity;
+
+        for (const key of candidates) {
+          const card = state.cards[key];
+
+          // 1. Unseen boost (newly unlocked Simon note gets immediate introduction)
+          if (card.attempts === 0) {
+            const unseenScore = 10.0 + Math.random() * 0.5;
+            if (unseenScore > highestScore) {
+              highestScore = unseenScore;
+              bestKey = key;
+            }
+            continue;
+          }
+
+          // 2. FSRS Forgetting Curve Retrievability: R = (1 + t / (9 * S))^-1
+          const elapsedHours = Math.max(0, (now - card.lastSeen) / (1000 * 60 * 60));
+          const retrievability = Math.pow(1 + elapsedHours / (9 * Math.max(0.05, card.stability)), -1);
+          const forgettingUrgency = 1 - retrievability; // Higher when close to forgetting
+
+          // 3. Response Latency Ratio (scales dynamically to user's selected targetLatencyMs)
+          const latencyRatio = card.lastLatencyMs
+            ? Math.min(2.5, card.lastLatencyMs / state.targetLatencyMs)
+            : 1.5;
+
+          // 4. Difficulty & Transient Error Boost (interleaves weak spots like B♭->G->B♭->F)
+          const diffFactor = card.difficulty / 10;
+          const errorUrgency = card.errorBoost;
+
+          // Weighted Priority Score + small jitter to keep sequences organic
+          const jitter = Math.random() * 0.22;
+          const priority =
+            (2.2 * forgettingUrgency) +
+            (1.8 * latencyRatio) +
+            (2.5 * errorUrgency) +
+            (0.6 * diffFactor) +
+            jitter;
+
+          if (priority > highestScore) {
+            highestScore = priority;
+            bestKey = key;
+          }
+        }
+
+        const [stringNum, fret] = bestKey.split(':').map(Number);
+        const pitchIndex = getPitchIndex(stringNum, fret);
+        lastTargetKey = bestKey;
+        currentTarget = { stringNum, fret, key: bestKey, pitchIndex };
+        promptStartTime = performance.now();
+        awaitingNext = false;
+
+        renderFretboard();
+        updatePromptHeader();
+      }
+
+      /**
+       * Updates FSRS Stability, Difficulty, and intra-session errorBoost after an answer.
+       */
+      function recordResponse(selectedPitchIndex) {
+        if (!currentTarget || awaitingNext) return;
+
+        const nowPerf = performance.now();
+        const latencyMs = Math.round(nowPerf - promptStartTime);
+        const card = state.cards[currentTarget.key];
+        const isCorrect = selectedPitchIndex === currentTarget.pitchIndex;
+
+        card.attempts += 1;
+        card.lastSeen = Date.now();
+        state.stats.totalAttempts += 1;
+
+        const btnEl = document.querySelector(`[data-pitch="${selectedPitchIndex}"]`);
+
+        if (isCorrect) {
+          awaitingNext = true;
+          card.correct += 1;
+          card.lastLatencyMs = latencyMs;
+          state.stats.totalCorrect += 1;
+          state.stats.sessionStreak += 1;
+          state.stats.recentLatencies.push(latencyMs);
+          if (state.stats.recentLatencies.length > 25) state.stats.recentLatencies.shift();
+          const isFast = latencyMs <= state.targetLatencyMs;
+          if (isFast) {
+            card.streak += 1;
+            card.stability = Math.min(720, card.stability * 1.85 + 0.25);
+            card.difficulty = Math.max(1.0, card.difficulty - 0.35);
+            card.errorBoost = Math.max(0, card.errorBoost - 0.6);
+          } else {
+            // Correct, but slower than target speed -> keep priority elevated
+            card.streak = 0;
+            card.stability = Math.max(0.2, card.stability * 1.1);
+            card.difficulty = Math.min(10.0, card.difficulty + 0.15);
+            card.errorBoost = Math.max(0.4, card.errorBoost);
+          }
+
+          // Visual feedback on keypad button
+          if (btnEl) {
+            btnEl.classList.add('!bg-emerald-500', '!text-white', '!border-emerald-400');
+            setTimeout(() => {
+              btnEl.classList.remove('!bg-emerald-500', '!text-white', '!border-emerald-400');
+            }, 240);
+          }
+
+          // Check if Simon Expanding Pool gate unlocked a new note
+          const expanded = evaluateSimonExpansionGate();
+          if (!expanded) {
+            const noteObj = CHROMATIC_NOTES[selectedPitchIndex];
+            const repsLeft = getRemainingRepsToExpand(state.zone);
+            if (isFast) {
+              showBanner(`✓ ${formatNoteName(noteObj)} (${latencyMs} ms) — ${repsLeft} clean rep${repsLeft === 1 ? '' : 's'} to +1 note`, 'good');
+            } else {
+              showBanner(`✓ ${formatNoteName(noteObj)} (${latencyMs} ms) — Aim under ${(state.targetLatencyMs / 1000).toFixed(1)}s`, 'warn');
+            }
+          }
+
+          saveState();
+          updateStatsUI(latencyMs, true);
+
+          setTimeout(() => {
+            selectNextTarget();
+          }, 220);
+
+        } else {
+          // Incorrect answer: penalize stability, raise difficulty & errorBoost so it interleaves soon
+          card.streak = 0;
+          card.lastLatencyMs = Math.max(latencyMs, state.targetLatencyMs * 1.5);
+          card.stability = Math.max(0.1, card.stability * 0.45);
+          card.difficulty = Math.min(10.0, card.difficulty + 0.8);
+          card.errorBoost = Math.min(3.0, card.errorBoost + 1.4);
+          state.stats.sessionStreak = 0;
+
+          if (btnEl) {
+            btnEl.classList.add('!bg-rose-500', '!text-white', '!border-rose-400', 'shake-error');
+            setTimeout(() => {
+              btnEl.classList.remove('!bg-rose-500', '!text-white', '!border-rose-400', 'shake-error');
+            }, 350);
+          }
+
+          const wrongNote = CHROMATIC_NOTES[selectedPitchIndex];
+          showBanner(`✕ Not ${formatNoteName(wrongNote)} — Try again on String ${currentTarget.stringNum}, Fret ${currentTarget.fret}`, 'bad');
+          saveState();
+          updateStatsUI(latencyMs, false);
+        }
+      }
+
+      // =========================================================================
+      // 5. UI RENDERING (FRETBOARD, KEYPAD, TELEMETRY)
+      // =========================================================================
+      function formatNoteName(noteObj) {
+        if (state.accidentalMode === 'sharp') return noteObj.sharp;
+        if (state.accidentalMode === 'flat') return noteObj.flat;
+        return noteObj.both;
+      }
+
+      function renderFretboard() {
+        const wrapper = document.getElementById('fretboard-wrapper');
+        const isFull = state.zone === 'full';
+        const { start: winStart, end: winEnd } = getZoneFretRange(state.zone);
+
+        // Visible frets: either the active 4-fret window (or 5 frets for 0-4) or full 0..12 neck
+        const visStart = isFull ? 0 : winStart;
+        const visEnd = isFull ? MAX_FRET : winEnd;
+        const fretCount = visEnd - visStart + 1;
+
+        // Ensure comfortable horizontal width on mobile when viewing all 13 frets
+        wrapper.style.minWidth = isFull ? '720px' : '100%';
+
+        const unlockedSet = new Set(state.zoneUnlocked[state.zone]);
+
+        // Build Fret Number Header Row (with explicit ANCHOR badge on first fret of active window)
+        let headerHtml = `<div class="grid items-end mb-2" style="grid-template-columns: 44px repeat(${fretCount}, minmax(0, 1fr));">`;
+        headerHtml += `<div class="text-[10px] font-mono text-zinc-400 text-center pb-1">STR</div>`;
+
+        for (let f = visStart; f <= visEnd; f++) {
+          const isAnchor = f === winStart;
+          const inActiveWindow = f >= winStart && f <= winEnd;
+          headerHtml += `
+            <div class="flex flex-col items-center justify-end pb-1">
+              ${isAnchor
+                ? `<span class="px-1.5 py-0.5 mb-1 rounded bg-studio-accent text-white font-mono text-[9px] sm:text-[10px] font-bold tracking-wider uppercase shadow-sm">FRET ${f}</span>`
+                : `<span class="font-mono text-xs sm:text-sm font-bold ${inActiveWindow ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400 dark:text-zinc-600'}">${f}</span>`
+              }
+            </div>
+          `;
+        }
+        headerHtml += `</div>`;
+
+        // Build Fretboard Body (Strings & Frets)
+        let boardHtml = `<div class="relative rounded-xl overflow-hidden border border-paper-border dark:border-studio-border bg-paper-wood dark:bg-studio-wood shadow-inner">`;
+
+        // Fretboard Inlay Dots Layer (3, 5, 7, 9, 12)
+        boardHtml += `<div class="absolute inset-0 grid pointer-events-none" style="grid-template-columns: 44px repeat(${fretCount}, minmax(0, 1fr));">`;
+        boardHtml += `<div></div>`;
+        for (let f = visStart; f <= visEnd; f++) {
+          const hasSingleInlay = INLAY_FRETS.has(f) && !DOUBLE_INLAY_FRETS.has(f);
+          const hasDoubleInlay = DOUBLE_INLAY_FRETS.has(f);
+          const inWindow = f >= winStart && f <= winEnd;
+          boardHtml += `
+            <div class="relative h-full border-r ${f === 0 ? 'border-r-4 border-zinc-300 dark:border-zinc-400 bg-zinc-900/60' : 'border-zinc-700/80'} ${!inWindow ? 'opacity-35' : ''}">
+              ${hasSingleInlay ? `<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-zinc-500/25"></div>` : ''}
+              ${hasDoubleInlay ? `
+                <div class="absolute top-[28%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-zinc-500/30"></div>
+                <div class="absolute top-[72%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-zinc-500/30"></div>
+              ` : ''}
+            </div>
+          `;
+        }
+        boardHtml += `</div>`;
+
+        // 6 Strings Rows
+        boardHtml += `<div class="relative z-10 flex flex-col divide-y divide-transparent">`;
+        for (const str of STRINGS) {
+          boardHtml += `<div class="grid items-center h-10 sm:h-11" style="grid-template-columns: 44px repeat(${fretCount}, minmax(0, 1fr));">`;
+
+          // String Label Column
+          boardHtml += `
+            <div class="h-full flex items-center justify-center bg-zinc-950/70 border-r border-zinc-700 font-mono text-xs font-bold text-zinc-300">
+              ${str.name}
+            </div>
+          `;
+
+          // Fret Cells along this string
+          for (let f = visStart; f <= visEnd; f++) {
+            const key = coordKey(str.stringNum, f);
+            const isTarget = currentTarget && currentTarget.key === key;
+            const isUnlocked = unlockedSet.has(key);
+            const card = state.cards[key];
+            const fluent = isCardFluent(card);
+
+            boardHtml += `
+              <div class="relative h-full flex items-center justify-center">
+                <!-- Physical String Wire -->
+                <div class="w-full bg-gradient-to-b from-zinc-300 to-zinc-500 opacity-85 pointer-events-none" style="height: ${str.gauge}px;"></div>
+
+                <!-- Optional Unlocked Pool Ghost Marker -->
+                ${(!isTarget && state.showPool && isUnlocked) ? `
+                  <div class="absolute w-3.5 h-3.5 rounded-full border ${fluent ? 'bg-emerald-500/30 border-emerald-400' : 'bg-amber-500/30 border-amber-400'} pointer-events-none"></div>
+                ` : ''}
+
+                <!-- Active Target Prompt Dot -->
+                ${isTarget ? `
+                  <div class="absolute w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-studio-accent text-white font-mono text-xs font-bold flex items-center justify-center target-dot-pulse ring-2 ring-white shadow-lg">
+                    ?
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          }
+          boardHtml += `</div>`;
+        }
+        boardHtml += `</div></div>`;
+
+        // Bottom Fret Number Footer Row for fast downward scanning
+        let footerHtml = `<div class="grid items-start mt-1.5" style="grid-template-columns: 44px repeat(${fretCount}, minmax(0, 1fr));">`;
+        footerHtml += `<div></div>`;
+        for (let f = visStart; f <= visEnd; f++) {
+          footerHtml += `
+            <div class="text-center font-mono text-[11px] ${f === winStart ? 'text-studio-accent font-bold' : 'text-zinc-400 dark:text-zinc-500'}">
+              ${f === 0 ? 'OPEN' : f}
+            </div>
+          `;
+        }
+        footerHtml += `</div>`;
+
+        wrapper.innerHTML = headerHtml + boardHtml + footerHtml;
+      }
+
+      function renderKeypad() {
+        const keypad = document.getElementById('note-keypad');
+        keypad.innerHTML = CHROMATIC_NOTES.map(note => {
+          const label = formatNoteName(note);
+          const shortcutHint = note.isAccidental
+            ? `⇧${note.naturalKey.toUpperCase()}`
+            : note.naturalKey.toUpperCase();
+
+          return `
+            <button
+              data-pitch="${note.index}"
+              class="note-key relative h-14 sm:h-16 rounded-xl border font-mono font-bold text-sm sm:text-base flex flex-col items-center justify-center transition-all active:scale-95 shadow-sm
+              ${note.isAccidental
+                ? 'bg-paper-elevated dark:bg-studio-elevated border-paper-border dark:border-studio-border text-zinc-800 dark:text-zinc-200 hover:border-studio-accent'
+                : 'bg-paper-surface dark:bg-studio-surface border-paper-border dark:border-studio-border text-zinc-950 dark:text-white hover:border-studio-accent'
+              }"
+            >
+              <span>${label}</span>
+              <span class="hidden sm:block text-[10px] font-normal text-zinc-400 dark:text-zinc-500 mt-0.5">${shortcutHint}</span>
+            </button>
+          `;
+        }).join('');
+
+        // Attach click/tap handlers
+        keypad.querySelectorAll('.note-key').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const pitch = Number(btn.getAttribute('data-pitch'));
+            recordResponse(pitch);
+          });
+        });
+      }
+
+      function updatePromptHeader() {
+        if (!currentTarget) return;
+        const strObj = STRINGS.find(s => s.stringNum === currentTarget.stringNum);
+        const fretText = currentTarget.fret === 0 ? 'Fret 0 (Open)' : `Fret ${currentTarget.fret}`;
+        document.getElementById('prompt-hint').textContent = `${strObj.label} · ${fretText}`;
+      }
+
+      function updateStatsUI(lastLatency = null, wasCorrect = true) {
+        const { start, end } = getZoneFretRange(state.zone);
+        document.getElementById('stat-window').textContent = `FRETS ${start}–${end}`;
+        document.getElementById('stat-anchor').textContent = `ANCHOR ${start}`;
+
+        // Sliding zone pill badge & manual shift controls
+        const slidingBadge = document.getElementById('sliding-badge');
+        // Simon Pool Progress & Active String Indicator
+        const allCoords = getOrderedZoneCoordinates(state.zone);
+        const unlocked = state.zoneUnlocked[state.zone];
+        const repsLeft = getRemainingRepsToExpand(state.zone);
+        const unlockedStringNums = [...new Set(unlocked.map(k => Number(k.split(':')[0])))];
+        const unlockedStringNames = unlockedStringNums
+          .map(num => STRINGS.find(s => s.stringNum === num)?.name)
+          .join('·');
+
+        document.getElementById('stat-pool').textContent = `${unlocked.length}/${allCoords.length} (${unlockedStringNames})`;
+        document.getElementById('stat-mastered').textContent = unlocked.length < allCoords.length
+          ? `${repsLeft} rep${repsLeft === 1 ? '' : 's'} to +1`
+          : 'All unlocked';
+
+        document.getElementById('order-toggle-btn').textContent =
+          state.expansionOrder === 'string' ? 'By String' : 'Cross-Str';
+        document.getElementById('speed-select').value = String(state.targetLatencyMs);
+
+        // Latency
+        const latEl = document.getElementById('stat-latency');
+        if (lastLatency !== null) {
+          latEl.textContent = `${lastLatency} ms`;
+          latEl.className = 'font-mono font-bold text-base sm:text-lg ' + (
+            !wasCorrect ? 'text-rose-500' :
+            lastLatency <= state.targetLatencyMs * 0.65 ? 'text-emerald-500' :
+            lastLatency <= state.targetLatencyMs ? 'text-amber-500' : 'text-orange-500'
+          );
+        }
+
+        if (state.stats.recentLatencies.length > 0) {
+          const sum = state.stats.recentLatencies.reduce((a, b) => a + b, 0);
+          const avg = Math.round(sum / state.stats.recentLatencies.length);
+          document.getElementById('stat-avg-latency').textContent = `avg ${avg} ms`;
+        }
+
+        // Streak & Accuracy
+        document.getElementById('stat-streak').textContent = state.stats.sessionStreak;
+        const acc = state.stats.totalAttempts > 0
+          ? Math.round((state.stats.totalCorrect / state.stats.totalAttempts) * 100)
+          : 100;
+        document.getElementById('stat-accuracy').textContent = `${acc}% acc`;
+
+        // Highlight active zone pill
+        document.querySelectorAll('.zone-btn').forEach(btn => {
+          const active = btn.getAttribute('data-zone') === state.zone;
+          btn.className = active
+            ? 'zone-btn px-2.5 sm:px-3 py-1 rounded-md font-mono text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 bg-studio-accent text-white shadow-sm'
+            : 'zone-btn px-2.5 sm:px-3 py-1 rounded-md font-mono text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white';
+        });
+
+        // Highlight active accidental button
+        document.querySelectorAll('.acc-btn').forEach(btn => {
+          const active = btn.getAttribute('data-acc') === state.accidentalMode;
+          btn.className = active
+            ? 'acc-btn px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+            : 'acc-btn px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white';
+        });
+      }
+
+      function showBanner(text, tone = 'info') {
+        const banner = document.getElementById('event-banner');
+        const dot = banner.querySelector('span:first-child');
+        const label = document.getElementById('event-text');
+
+        label.textContent = text;
+        const dotColors = {
+          good: 'bg-emerald-500',
+          warn: 'bg-amber-500',
+          bad: 'bg-rose-500',
+          unlock: 'bg-studio-accent',
+          info: 'bg-zinc-400'
+        };
+        dot.className = `w-1.5 h-1.5 rounded-full ${dotColors[tone] || dotColors.info}`;
+      }
+
+      // =========================================================================
+      // 6. EVENT LISTENERS, KEYBOARD SHORTCUTS, SPRINT TIMER & SYNC MODAL
+      // =========================================================================
+      function setZone(newZone) {
+        state.zone = newZone;
+        ensureZonePoolInitialized(newZone);
+        saveState();
+        updateStatsUI();
+        selectNextTarget();
+      }
+
+      function applyTheme() {
+        const html = document.documentElement;
+        if (state.theme === 'dark') {
+          html.classList.add('dark');
+        } else {
+          html.classList.remove('dark');
+        }
+      }
+
+      function toggleSprintTimer() {
+        const dot = document.getElementById('sprint-dot');
+        const label = document.getElementById('sprint-label');
+
+        if (sprintRunning) {
+          clearInterval(sprintInterval);
+          sprintRunning = false;
+          sprintSecondsLeft = 120;
+          label.textContent = '2:00';
+          dot.className = 'w-1.5 h-1.5 rounded-full bg-zinc-400';
+          showBanner('2-Minute Sprint reset.', 'info');
+          return;
+        }
+
+        sprintRunning = true;
+        sprintSecondsLeft = 120;
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-studio-accent animate-ping';
+        showBanner('2-Minute Daily Sprint started — keep it effortless!', 'unlock');
+
+        sprintInterval = setInterval(() => {
+          sprintSecondsLeft -= 1;
+          const mins = Math.floor(sprintSecondsLeft / 60);
+          const secs = String(sprintSecondsLeft % 60).padStart(2, '0');
+          label.textContent = `${mins}:${secs}`;
+
+          if (sprintSecondsLeft <= 0) {
+            clearInterval(sprintInterval);
+            sprintRunning = false;
+            dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-500';
+            label.textContent = 'DONE';
+            showBanner('2-Minute Sprint complete! Consistency beats marathon sessions.', 'good');
+          }
+        }, 1000);
+      }
+
+      function bindEvents() {
+        // Zone selector buttons
+        document.querySelectorAll('.zone-btn').forEach(btn => {
+          btn.addEventListener('click', () => setZone(btn.getAttribute('data-zone')));
+        });
+
+        // Accidental display toggle
+        document.querySelectorAll('.acc-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            state.accidentalMode = btn.getAttribute('data-acc');
+            saveState();
+            updateStatsUI();
+            renderKeypad();
+          });
+        });
+
+        // Target speed selector
+        document.getElementById('speed-select').addEventListener('change', (e) => {
+          state.targetLatencyMs = Number(e.target.value);
+          saveState();
+          updateStatsUI();
+          showBanner(`Target speed set to ${(state.targetLatencyMs / 1000).toFixed(1)}s`, 'info');
+        });
+
+        // Expansion order toggle (String-by-String vs Cross-String)
+        document.getElementById('order-toggle-btn').addEventListener('click', () => {
+          state.expansionOrder = state.expansionOrder === 'string' ? 'cross' : 'string';
+          const z = state.zone;
+          state.zoneUnlocked[z] = [];
+          ensureZonePoolInitialized(z);
+          saveState();
+          updateStatsUI();
+          selectNextTarget();
+          showBanner(
+            state.expansionOrder === 'string'
+              ? 'Expansion: String-by-String (Low E → A → D → G → B → High e)'
+              : 'Expansion: Cross-String (Fret-by-fret across all 6 strings)',
+            'info'
+          );
+        });
+
+        // Theme toggle
+        document.getElementById('theme-btn').addEventListener('click', () => {
+          state.theme = state.theme === 'dark' ? 'light' : 'dark';
+          applyTheme();
+          saveState();
+        });
+
+        // Sprint timer toggle
+        document.getElementById('sprint-btn').addEventListener('click', toggleSprintTimer);
+
+        // Manual +1 Note unlock
+        document.getElementById('force-unlock-btn').addEventListener('click', manuallyUnlockNextNote);
+
+        // Show Pool Ghost Dots toggle
+        document.getElementById('peek-pool-btn').addEventListener('click', (e) => {
+          state.showPool = !state.showPool;
+          e.target.textContent = `Show Pool: ${state.showPool ? 'ON' : 'OFF'}`;
+          renderFretboard();
+        });
+
+        // Sliding window manual step controls
+        document.getElementById('slide-down-btn').addEventListener('click', () => {
+          state.slidingStart = Math.max(0, state.slidingStart - 1);
+          ensureZonePoolInitialized('sliding');
+          saveState();
+          updateStatsUI();
+          selectNextTarget();
+        });
+
+        document.getElementById('slide-up-btn').addEventListener('click', () => {
+          state.slidingStart = Math.min(MAX_FRET - 3, state.slidingStart + 1);
+          ensureZonePoolInitialized('sliding');
+          saveState();
+          updateStatsUI();
+          selectNextTarget();
+        });
+
+        // Reset current zone progress
+        document.getElementById('reset-zone-btn').addEventListener('click', () => {
+          const z = state.zone;
+          const coords = getOrderedZoneCoordinates(z);
+          for (const k of coords) {
+            const [sNum, fret] = k.split(':').map(Number);
+            state.cards[k] = createDefaultCard(sNum, fret);
+          }
+          state.zoneUnlocked[z] = [];
+          ensureZonePoolInitialized(z);
+          saveState();
+          updateStatsUI();
+          selectNextTarget();
+          showBanner(`Reset zone "${z}" back to initial 4-note Simon pool.`, 'info');
+        });
+
+        // Desktop Keyboard Support (A-G for natural, Shift+A/C/D/F/G for sharp)
+        window.addEventListener('keydown', (e) => {
+          // Ignore shortcuts when typing inside Sync modal textarea
+          if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') return;
+
+          const key = e.key.toLowerCase();
+          const naturalMap = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+          if (key in naturalMap) {
+            e.preventDefault();
+            let pitch = naturalMap[key];
+            if (e.shiftKey && key !== 'e' && key !== 'b') {
+              pitch = (pitch + 1) % 12;
+            }
+            recordResponse(pitch);
+          }
+        });
+
+        // Sync / Export / Import Modal
+        const modal = document.getElementById('sync-modal');
+        const textarea = document.getElementById('sync-textarea');
+        const syncStatus = document.getElementById('sync-status');
+
+        document.getElementById('sync-btn').addEventListener('click', () => {
+          textarea.value = JSON.stringify(state);
+          syncStatus.classList.add('hidden');
+          modal.classList.remove('hidden');
+          modal.classList.add('flex');
+        });
+
+        document.getElementById('close-sync-btn').addEventListener('click', () => {
+          modal.classList.add('hidden');
+          modal.classList.remove('flex');
+        });
+
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+          }
+        });
+
+        document.getElementById('copy-state-btn').addEventListener('click', () => {
+          textarea.select();
+          document.execCommand('copy');
+          syncStatus.textContent = '✓ Copied state JSON to clipboard.';
+          syncStatus.classList.remove('hidden');
+        });
+
+        document.getElementById('import-state-btn').addEventListener('click', () => {
+          try {
+            const parsed = JSON.parse(textarea.value.trim());
+            if (!parsed || typeof parsed !== 'object' || !parsed.cards) {
+              throw new Error('Invalid state payload');
+            }
+            state = {
+              ...state,
+              ...parsed,
+              zoneUnlocked: { ...state.zoneUnlocked, ...(parsed.zoneUnlocked || {}) },
+              stats: { ...state.stats, ...(parsed.stats || {}) }
+            };
+            ensureAllCardsInitialized();
+            ensureZonePoolInitialized(state.zone);
+            saveState();
+            applyTheme();
+            renderKeypad();
+            updateStatsUI();
+            selectNextTarget();
+            syncStatus.textContent = '✓ Progress successfully restored!';
+            syncStatus.classList.remove('hidden');
+          } catch (err) {
+            syncStatus.textContent = '✕ Invalid JSON format. Paste an unmodified export payload.';
+            syncStatus.classList.remove('hidden');
+          }
+        });
+
+        document.getElementById('download-json-btn').addEventListener('click', () => {
+          const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `fretlab-backup-${new Date().toISOString().slice(0, 10)}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        });
+      }
+
+      // =========================================================================
+      // 7. BOOTSTRAP
+      // =========================================================================
+      loadState();
+      applyTheme();
+      bindEvents();
+      renderKeypad();
+      updateStatsUI();
+      selectNextTarget();
+    })();
+  </script>
+</body>
+</html>
